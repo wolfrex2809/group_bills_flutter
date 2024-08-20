@@ -1,11 +1,17 @@
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/rendering.dart';
-import 'package:flutter/widgets.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
 import 'models.dart';
+import 'widgets/bills.dart';
 
-void main() {
+Future<void> main() async{
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
   runApp(const MyApp());
 }
 
@@ -27,10 +33,11 @@ class _MyAppState extends State<MyApp> {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blueAccent),
         useMaterial3: true,
       ),
-      initialRoute: loggedUser.id != "" ? "/"  : "/login",
+      initialRoute: FirebaseAuth.instance.currentUser != null ? "/home"  : "/login",
       routes: {
-        '/': (context) => MyHomePage(title: 'Hola, ${loggedUser.name}',),
+        '/home': (context) => MyHomePage(title: 'Hola, ${FirebaseAuth.instance.currentUser != null ? FirebaseAuth.instance.currentUser!.displayName : ""}',),
         '/login': (context) => Login(),
+        '/home/create_bill': (context) => CreateBill()
       },
     );
   }
@@ -46,16 +53,43 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
 
-  void _incrementCounter() {
-    setState(() {
-      _counter++;
-    });
+  final List<Bills> bills = [];
+
+  Future<List> getBills() async {
+    final ref = FirebaseDatabase.instance.ref();
+    final snapshot = await ref.child('bills').get();
+    if (snapshot.exists) {
+        var result = snapshot.value as Map;
+        var _bills = Map.from(result)..removeWhere((key, value) => FirebaseAuth.instance.currentUser!.uid != value["user_id"]);
+        _bills.forEach((key, value) { 
+          // var participants = value["participants"] as Map;
+          // print(participants);
+          var bill = Bills(
+            id: key,
+            userId: value["user_id"],
+            title: value["title"],
+            total: value["value"],
+            date: DateTime.parse(value["date"]),
+            participants: []
+          );
+          bills.add(bill);
+        });
+        return bills;
+    } else {
+        print('No bills data available.');
+        return [];
+    }
   }
 
+  Future<void> processCreateBill() async{
+    var response = await getBills();
+    print(response);
+  }
   @override
   Widget build(BuildContext context) {
+    processCreateBill();
+    print("rebuild");
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
@@ -77,6 +111,13 @@ class _MyHomePageState extends State<MyHomePage> {
                 
               },
             ),
+            ListTile(
+              title: const Text("Sign out"),
+              onTap: (){
+                FirebaseAuth.instance.signOut();
+                Navigator.popAndPushNamed(context, "/login");
+              },
+            ),
           ],
         )
       ),
@@ -96,7 +137,7 @@ class _MyHomePageState extends State<MyHomePage> {
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: (){
-
+          Navigator.pushNamed(context, "/home/create_bill");
         },
         tooltip: 'New',
         child: const Icon(Icons.add),
@@ -114,11 +155,49 @@ class Login extends StatefulWidget {
 }
 
 class _LoginState extends State<Login> {
-  final _formKey = GlobalKey<FormState>();
 
-  final _nameController = TextEditingController(); 
-  final _passController = TextEditingController(); 
-  bool passwordVisible=true;
+  DatabaseReference ref = FirebaseDatabase.instance.ref();
+
+  Future<UserCredential> signInWithGoogle() async {
+    final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
+    final GoogleSignInAuthentication? googleAuth = await googleUser?.authentication;
+    final credential = GoogleAuthProvider.credential(
+      accessToken: googleAuth?.accessToken,
+      idToken: googleAuth?.idToken,
+    );
+
+    return await FirebaseAuth.instance.signInWithCredential(credential);
+  }
+
+  Future<void> signAndAssing() async {
+    await signInWithGoogle(); 
+    print(FirebaseAuth.instance.currentUser);
+    if (FirebaseAuth.instance.currentUser != null){
+      bool usersExists = await searchUser(FirebaseAuth.instance.currentUser!.uid);
+      print(usersExists);
+      if(!usersExists){
+        await createUser(FirebaseAuth.instance.currentUser!.uid, FirebaseAuth.instance.currentUser!.displayName);
+      }
+      loggedUser.id = FirebaseAuth.instance.currentUser!.uid;
+      loggedUser.name = FirebaseAuth.instance.currentUser!.displayName;
+    }
+    Navigator.popAndPushNamed(context, "/home");
+  }
+
+  Future<bool> searchUser(uid) async{
+    final snapshot = await ref.child('users/$uid').get();
+    return (snapshot.exists);
+  }
+
+  Future<void> createUser(id, name) async{
+    final postData = {
+        'name': name,
+    };
+    final Map<String, Map> updates = {};
+    updates['/users/$id'] = postData;
+    return FirebaseDatabase.instance.ref().update(updates);
+  }
+
   @override
   Widget build(BuildContext context) {
     return  Scaffold(
@@ -131,67 +210,28 @@ class _LoginState extends State<Login> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                const Text("Make money not Friends"),
-                Form(
-                  key: _formKey,
-                  child: Column(
+                const Center(
+                 child: Text("Make money not friends!"),
+                ),
+                ElevatedButton(
+                  onPressed: (){
+                      signAndAssing();
+                      
+                  },
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      TextFormField(
-                        controller: _nameController,
-                        textInputAction: TextInputAction.next,
-                        keyboardType: TextInputType.text,
-                        decoration: const InputDecoration(
-                          label: Text("Name")
+                       Container(
+                        width: 40,
+                        height: 40,
+                        child:Image.network(
+                          'http://pngimg.com/uploads/google/google_PNG19635.png',
+                          fit:BoxFit.cover
                         ),
-                        validator: (value){
-                          if(value == null || value.isEmpty){
-                            return "Please type your name";
-                          }
-                          return null;
-                        },
                       ),
-                      TextFormField(
-                        controller: _passController,
-                        obscureText: passwordVisible,
-                        keyboardType: TextInputType.visiblePassword,
-                        textInputAction: TextInputAction.done,
-                        decoration: InputDecoration(
-                          label: const Text("Password"),
-                          suffixIcon: IconButton(
-                            icon: Icon((passwordVisible ? Icons.visibility : Icons.visibility_off)),
-                            onPressed: () {
-                              setState(
-                                () {
-                                  passwordVisible = !passwordVisible;
-                                },
-                              );
-                            },
-                          ),
-                        ),
-                        validator: (value){
-                          if(value == null || value.isEmpty){
-                            return "Please type your password";
-                          }
-                          return null;
-                        },
-                      ),
-                      Padding(
-                        padding:EdgeInsetsDirectional.symmetric(vertical: 15.0),
-                        child: ElevatedButton(
-                          onPressed: (){
-                            if (_formKey.currentState!.validate()) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Processing Data')),
-                              );
-                              loggedUser = AppUser(id: _passController.text, name: _nameController.text);
-                              Navigator.popAndPushNamed(context, "/");
-                            }
-                          }, 
-                          child: Text("Log in")
-                        ),
-                      )
+                      Text("Sign in")
                     ],
-                  ),
+                  )
                 ),
               ],
             ),

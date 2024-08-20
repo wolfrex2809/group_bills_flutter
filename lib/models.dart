@@ -14,16 +14,18 @@ Map paymentMethods = {
 class AppUser{
   AppUser({required this.id, required this.name});
   late String id;
-  late String name;
+  late String? name;
 }
 
+
 class Bills{
-  late String id; //PK
-  late String userId; //FK AppUser.id
-  late String title;
-  late Float total;
-  late DateTime date;
-  late List<String> participants; //FK []AppUser.id
+  Bills({this.id, this.userId, this.title, this.total, this.date, this.participants});
+  late String? id; //PK
+  late String? userId; //FK AppUser.id
+  late String? title;
+  late double? total;
+  late DateTime? date;
+  late List<String>? participants; //FK []AppUser.id
 }
 
 class Debt{
